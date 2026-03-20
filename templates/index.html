@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Combustion Tube FEA Analyser</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f5f4f0;
+      color: #1a1a18;
+      min-height: 100vh;
+      padding: 1.5rem;
+    }
+
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 0.3rem; }
+    .subtitle { font-size: 13px; color: #6b6b65; margin-bottom: 1.5rem; }
+
+    .layout { display: grid; grid-template-columns: 320px 1fr; gap: 1.2rem; }
+    @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+
+    /* ── Inputs panel ── */
+    .panel {
+      background: #fff;
+      border: 1px solid #e0dfd7;
+      border-radius: 12px;
+      padding: 1.2rem;
+    }
+    .panel-title { font-size: 13px; font-weight: 600; color: #444; text-transform: uppercase;
+                   letter-spacing: 0.05em; margin-bottom: 1rem; }
+
+    .field { margin-bottom: 1rem; }
+    .field label { display: flex; justify-content: space-between; font-size: 13px;
+                   color: #555; margin-bottom: 4px; }
+    .field label .val { font-weight: 600; color: #1a1a18; }
+    input[type=range] {
+      width: 100%; height: 5px; accent-color: #185FA5;
+      cursor: pointer; background: transparent;
+    }
+    select {
+      width: 100%; padding: 7px 10px; border: 1px solid #d8d7cf;
+      border-radius: 8px; font-size: 13px; background: #fafaf7;
+      color: #1a1a18; cursor: pointer;
+    }
+
+    .run-btn {
+      width: 100%; padding: 10px; background: #185FA5; color: #fff;
+      border: none; border-radius: 8px; font-size: 14px; font-weight: 600;
+      cursor: pointer; margin-top: 0.5rem; transition: background 0.2s;
+    }
+    .run-btn:hover { background: #0C447C; }
+
+    /* ── Results panel ── */
+    .results { display: flex; flex-direction: column; gap: 1rem; }
+
+    .result-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; }
+    @media (max-width: 900px) { .result-grid { grid-template-columns: repeat(2, 1fr); } }
+
+    .metric-card {
+      background: #fff;
+      border: 1px solid #e0dfd7;
+      border-radius: 10px;
+      padding: 0.9rem 1rem;
+    }
+    .metric-label { font-size: 11px; color: #888; margin-bottom: 3px; }
+    .metric-value { font-size: 22px; font-weight: 600; color: #1a1a18; }
+    .metric-sub   { font-size: 11px; color: #888; margin-top: 2px; }
+
+    /* utilisation bar */
+    .util-wrap { background: #fff; border: 1px solid #e0dfd7; border-radius: 10px; padding: 1rem 1.2rem; }
+    .util-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .util-label { font-size: 13px; font-weight: 600; }
+    .util-pct { font-size: 20px; font-weight: 700; }
+    .bar-bg { background: #eeeee8; border-radius: 6px; height: 10px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 6px; transition: width 0.5s ease, background 0.5s; }
+    .status-badge {
+      display: inline-block; padding: 3px 12px; border-radius: 20px;
+      font-size: 12px; font-weight: 600; margin-top: 8px;
+    }
+    .badge-ok   { background: #E1F5EE; color: #085041; }
+    .badge-warn { background: #FAEEDA; color: #633806; }
+    .badge-fail { background: #FCEBEB; color: #501313; }
+
+    /* chart */
+    .chart-card { background: #fff; border: 1px solid #e0dfd7; border-radius: 10px; padding: 1rem 1.2rem; }
+    .chart-title { font-size: 13px; font-weight: 600; color: #444; margin-bottom: 0.8rem; }
+
+    /* stress breakdown */
+    .breakdown { background: #fff; border: 1px solid #e0dfd7; border-radius: 10px; padding: 1rem 1.2rem; }
+    .breakdown-title { font-size: 13px; font-weight: 600; color: #444; margin-bottom: 0.8rem; }
+    .brow { display: flex; justify-content: space-between; align-items: center;
+            padding: 5px 0; border-bottom: 1px solid #f0efe8; font-size: 13px; }
+    .brow:last-child { border-bottom: none; }
+    .brow .bname { color: #555; }
+    .brow .bval  { font-weight: 600; color: #1a1a18; }
+
+    .placeholder { color: #aaa; font-size: 14px; text-align: center; padding: 3rem; }
+  </style>
+</head>
+<body>
+
+<h1>Combustion Tube FEA Analyser</h1>
+<p class="subtitle">Thick-wall pressure + thermal stress analysis &nbsp;·&nbsp; API 530 / Lamé equations &nbsp;·&nbsp; Indicative creep life</p>
+
+<div class="layout">
+
+  <!-- ── LEFT: Inputs ── -->
+  <div class="panel">
+    <div class="panel-title">Tube parameters</div>
+
+    <div class="field">
+      <label>Material</label>
+      <select id="material">
+        <option value="cs">Carbon steel A106</option>
+        <option value="p91" selected>9Cr-1Mo P91</option>
+        <option value="hp">HP alloy 25Cr-35Ni</option>
+        <option value="347h">347H stainless</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Outer diameter (mm) <span class="val" id="vOD">168</span></label>
+      <input type="range" id="OD" min="60" max="400" value="168" oninput="sync('OD','vOD')">
+    </div>
+
+    <div class="field">
+      <label>Wall thickness (mm) <span class="val" id="vWT">9</span></label>
+      <input type="range" id="t" min="4" max="40" value="9" oninput="sync('t','vWT')">
+    </div>
+
+    <div class="field">
+      <label>Internal pressure (barg) <span class="val" id="vP">25</span></label>
+      <input type="range" id="P" min="1" max="150" value="25" oninput="sync('P','vP')">
+    </div>
+
+    <div class="field">
+      <label>Process fluid temp (°C) <span class="val" id="vTf">600</span></label>
+      <input type="range" id="T_fluid" min="200" max="1000" value="600" oninput="sync('T_fluid','vTf')">
+    </div>
+
+    <div class="field">
+      <label>Fire-side heat flux (kW/m²) <span class="val" id="vQ">80</span></label>
+      <input type="range" id="Q" min="10" max="250" value="80" oninput="sync('Q','vQ')">
+    </div>
+
+    <button class="run-btn" onclick="runAnalysis()">Run analysis</button>
+  </div>
+
+  <!-- ── RIGHT: Results ── -->
+  <div class="results" id="results">
+    <div class="placeholder">Adjust inputs and click <strong>Run analysis</strong></div>
+  </div>
+
+</div>
+
+<script>
+  function sync(sliderId, labelId) {
+    document.getElementById(labelId).textContent = document.getElementById(sliderId).value;
+  }
+
+  async function runAnalysis() {
+    const btn = document.querySelector('.run-btn');
+    btn.textContent = 'Calculating…'; btn.disabled = true;
+
+    const payload = {
+      OD:       document.getElementById('OD').value,
+      t:        document.getElementById('t').value,
+      P:        document.getElementById('P').value,
+      T_fluid:  document.getElementById('T_fluid').value,
+      Q:        document.getElementById('Q').value,
+      material: document.getElementById('material').value,
+    };
+
+    try {
+      const resp = await fetch('/api/analyse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (data.ok) renderResults(data.result);
+      else alert('Error: ' + data.error);
+    } catch (e) {
+      alert('Could not connect to server: ' + e);
+    }
+
+    btn.textContent = 'Run analysis'; btn.disabled = false;
+  }
+
+  function renderResults(r) {
+    const utilPct = Math.min(r.utilisation_pct, 100);
+    const barColor = r.status === 'ok' ? '#1D9E75' : r.status === 'warning' ? '#BA7517' : '#A32D2D';
+    const badgeClass = r.status === 'ok' ? 'badge-ok' : r.status === 'warning' ? 'badge-warn' : 'badge-fail';
+
+    document.getElementById('results').innerHTML = `
+
+      <!-- Key metrics -->
+      <div class="result-grid">
+        <div class="metric-card">
+          <div class="metric-label">Hoop stress (inner, Lamé)</div>
+          <div class="metric-value">${r.sigma_hoop_inner} <span style="font-size:14px;font-weight:400">MPa</span></div>
+          <div class="metric-sub">Pressure-driven, at inner wall</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Thermal stress (ΔT through wall)</div>
+          <div class="metric-value">${r.sigma_thermal} <span style="font-size:14px;font-weight:400">MPa</span></div>
+          <div class="metric-sub">Wall ΔT = ${r.delta_T}°C</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Von Mises — max combined</div>
+          <div class="metric-value">${r.vm_max} <span style="font-size:14px;font-weight:400">MPa</span></div>
+          <div class="metric-sub">Outer: ${r.vm_outer} / Inner: ${r.vm_inner} MPa</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Outer wall temperature</div>
+          <div class="metric-value">${r.T_outer} <span style="font-size:14px;font-weight:400">°C</span></div>
+          <div class="metric-sub">Inner: ${r.T_inner}°C (≈ fluid)</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Allowable stress at T_outer</div>
+          <div class="metric-value">${r.allowable} <span style="font-size:14px;font-weight:400">MPa</span></div>
+          <div class="metric-sub">${r.material_name}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Indicative creep life</div>
+          <div class="metric-value" style="font-size:18px">${r.life_str}</div>
+          <div class="metric-sub">LMP ≈ ${r.lmp} ×10³</div>
+        </div>
+      </div>
+
+      <!-- Utilisation bar -->
+      <div class="util-wrap">
+        <div class="util-header">
+          <span class="util-label">Stress utilisation (Von Mises / allowable)</span>
+          <span class="util-pct" style="color:${barColor}">${r.utilisation_pct}%</span>
+        </div>
+        <div class="bar-bg">
+          <div class="bar-fill" style="width:${utilPct}%; background:${barColor}"></div>
+        </div>
+        <span class="status-badge ${badgeClass}">${r.status_text}</span>
+        &nbsp; <span style="font-size:12px;color:#888">Safety factor: ${r.safety_factor}×</span>
+      </div>
+
+      <!-- Wall temperature profile chart -->
+      <div class="chart-card">
+        <div class="chart-title">Temperature profile through tube wall</div>
+        <canvas id="wallChart" height="120"></canvas>
+      </div>
+
+      <!-- Stress breakdown table -->
+      <div class="breakdown">
+        <div class="breakdown-title">Full stress breakdown</div>
+        <div class="brow"><span class="bname">Hoop stress — inner surface (Lamé)</span><span class="bval">${r.sigma_hoop_inner} MPa</span></div>
+        <div class="brow"><span class="bname">Hoop stress — outer surface (Lamé)</span><span class="bval">${r.sigma_hoop_outer} MPa</span></div>
+        <div class="brow"><span class="bname">Axial stress (closed ends)</span><span class="bval">${r.sigma_axial} MPa</span></div>
+        <div class="brow"><span class="bname">Thermal bending stress magnitude</span><span class="bval">${r.sigma_thermal} MPa</span></div>
+        <div class="brow"><span class="bname">Von Mises — outer (fire side)</span><span class="bval">${r.vm_outer} MPa</span></div>
+        <div class="brow"><span class="bname">Von Mises — inner (process side)</span><span class="bval">${r.vm_inner} MPa</span></div>
+      </div>
+    `;
+
+    // Draw wall temperature chart
+    const ctx = document.getElementById('wallChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: r.wall_profile.x.map((v, i) =>
+          i === 0 ? 'Inner wall' : i === r.wall_profile.x.length - 1 ? 'Outer wall' : ''
+        ),
+        datasets: [{
+          label: 'Temperature (°C)',
+          data: r.wall_profile.T,
+          borderColor: '#D85A30',
+          backgroundColor: 'rgba(216,90,48,0.08)',
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: true,
+          tension: 0.1,
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: {
+            ticks: { maxTicksLimit: 3, font: { size: 11 } },
+            grid: { color: 'rgba(0,0,0,0.05)' },
+          },
+          y: {
+            ticks: { font: { size: 11 }, callback: v => v + '°C' },
+            grid: { color: 'rgba(0,0,0,0.05)' },
+          },
+        },
+      },
+    });
+  }
+</script>
+</body>
+</html>
