@@ -1,0 +1,44 @@
+{
+  // This file tells GitHub Codespaces to automatically set up
+  // your environment every time you open the Codespace.
+  // You never need to run "pip install" manually again.
+
+  "name": "FEA Tube Analyser",
+
+  // Use Microsoft's standard Python 3 image — Python is pre-installed
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+
+  // Automatically install Python packages when the Codespace starts
+  "postCreateCommand": "pip install -r requirements.txt",
+
+  // VS Code extensions to auto-install inside Codespaces
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",          // Python language support
+        "ms-python.pylint",          // Code quality hints
+        "ms-toolsai.jupyter"         // Jupyter notebooks (optional)
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "editor.formatOnSave": true,
+        "editor.fontSize": 14
+      }
+    }
+  },
+
+  // Automatically forward these ports so your app is accessible in the browser
+  "forwardPorts": [8501, 8080],
+
+  // Labels shown in the Ports panel
+  "portsAttributes": {
+    "8501": {
+      "label": "Streamlit app",
+      "onAutoForward": "openBrowser"
+    },
+    "8080": {
+      "label": "Flask app",
+      "onAutoForward": "notify"
+    }
+  }
+}
