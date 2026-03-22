@@ -165,7 +165,8 @@ def lobo_evans_radiant(
         D_tube_CL: float,       # tube CL diameter m
         N_tubes: int,           # number of radiant tubes
         D_tube_OD: float,       # tube OD m
-        L_tube: float,          # effective tube length m
+        L_tube: float,          # effective tube length m (for exchange area geometry)
+        L_tube_overall: float = None,  # overall tube length m (for surface area / flux)
         alpha_tube: float = 0.97, # tube absorption factor
         excess_air: float = 0.15, # fraction
 ) -> dict:
@@ -213,11 +214,15 @@ def lobo_evans_radiant(
         T_g_K = max(T_g_K, T_w_K + 100)
 
     # ── Average and peak heat flux ─────────────────────────────
-    q_avg  = Q_R / A_cp                         # W/m²
-    # Circumferential flux factor F for single-row VC:
-    # F ≈ 1.0 for inside of circle (all tubes see same flux)
-    # Peak on fire-facing side: F_peak ≈ 1.0 for VC (uniform)
-    # Slight correction for 6-burner arrangement: ~1.02-1.05
+    # Flux density uses FULL outer surface area (not projected cold-plane area).
+    # A_cp is used only for exchange-area geometry; actual flux is over tube surface.
+    # Datasheet check: 11.124 MW / 315.13 m2 = 35.3 kW/m2 (matches DS row 16)
+    L_for_area = L_tube_overall if L_tube_overall is not None else L_tube
+    A_surface = N_tubes * np.pi * D_tube_OD * L_for_area   # full outer surface m2
+    q_avg  = Q_R / max(A_surface, 0.001)               # W/m2
+    # Circumferential flux factor F for single-row VC heater.
+    # Tubes on fire-facing side receive higher flux than average.
+    # API 560 / common practice for VC with floor burners: F_peak = 1.0 - 1.1
     F_peak = 1.05
     q_peak = q_avg * F_peak
 
@@ -227,6 +232,7 @@ def lobo_evans_radiant(
     return dict(
         Q_R_MW       = Q_R / 1e6,
         A_cp         = A_cp,
+        A_surface    = A_surface,
         A_r_net      = A_r_net,
         A_eff        = A_eff,
         T_g_K        = T_g_K,
@@ -841,7 +847,7 @@ D_fb     = sb.number_input("Firebox ID — to refractory (m)", 2.0,12.0, 5.30, 0
 H_fb     = sb.number_input("Firebox height (m)",             6.0,25.0,12.50, 0.25)
 D_tube_CL= sb.number_input("Tube CL diameter (m)",          2.0,10.0, 4.66, 0.05)
 N_rad    = sb.number_input("Number of radiant tubes",        12, 120,   48,   1)
-pitch_rad= sb.number_input("Tube CL–CL pitch (mm)",        200, 600,  304.8, 5.0)
+pitch_rad= sb.number_input("Tube CL–CL pitch (mm)",        200.0, 600.0,  304.8, 5.0)
 sb.markdown("---")
 
 sb.markdown("### Radiant tube specifications")
@@ -851,7 +857,8 @@ D_o_mm   = PIPE_NPS[tube_nps]["OD"]
 # Override with datasheet actual: OD=168.28mm, wall=18.24mm
 D_o_mm   = sb.number_input("Tube OD (mm)",        100.0,400.0,168.28,0.5)
 t_wall   = sb.number_input("Wall thickness (mm)",  5.0,  50.0, 18.24, 0.1)
-L_eff    = sb.number_input("Effective tube length (mm)", 5000,20000,12000,100)
+L_eff    = sb.number_input("Effective tube length (mm)",  5000.0, 20000.0, 12000.0, 100.0)
+L_overall= sb.number_input("Overall tube length (mm)",    5000.0, 25000.0, 12480.0, 100.0)
 mat_rad  = sb.selectbox("Radiant material (rows 1-4)",
                          list(API530.keys()), index=0)
 mat_conv = sb.selectbox("Conv./shield material",
@@ -913,7 +920,8 @@ sb.caption("Pre-loaded: Q9334X-DS300 Rev3 · API 530 6th Ed.")
 # ================================================================
 mdot_fg   = mdot_fg_hr / 3600          # kg/s
 mdot_proc_s = mdot_proc / 3600         # kg/s
-L_eff_m   = L_eff / 1000              # m
+L_eff_m   = L_eff / 1000              # m — effective (exposed to flue gas)
+L_overall_m = L_overall / 1000        # m — overall (for surface area)
 D_o_m     = D_o_mm / 1000
 D_i_m     = D_o_m - 2*(t_wall/1000)
 
@@ -942,6 +950,7 @@ radiant = lobo_evans_radiant(
     N_tubes     = int(N_rad),
     D_tube_OD   = D_o_m,
     L_tube      = L_eff_m,
+    L_tube_overall = L_overall_m,
     alpha_tube  = 0.97,
     excess_air  = excess_air/100,
 )
@@ -1012,20 +1021,28 @@ conv_b2 = conv_section_calc(
 )
 
 # MODULE B — Flue gas profile
+# T_fg_arch is the flue gas temperature LEAVING the radiant section (at arch).
+# The radiant heat has already been extracted to reach T_fg_arch.
+# So only convective sections are listed here — starting at arch temperature.
+# Datasheet (Sheet2 row 10): flue gas T leaving radiant=800, shield=710, bank1=503, bank2=313°C
 A_conv_flow = (L_sh/1000) * (pitch_rad/1000 - D_o_m) * max(int(N_sh//N_sh_rows),1)
+
+# Use process-duty derived Q for each convective section so profile matches datasheet
+Q_sh_W  = mdot_proc_s * fp_rad["Cp"] * (T_sh_out  - T_rad_out)   # W, conv shield
+Q_b1_W  = mdot_proc_s * fp_rad["Cp"] * (T_b1_out  - T_sh_out)    # W, bank 1
+Q_b2_W  = mdot_proc_s * fp_rad["Cp"] * (T_b2_out  - T_b1_out)    # W, bank 2
+
 sections_list = [
-    {"name":"Radiant",        "Q_abs_W": radiant["Q_R_MW"]*1e6,
-     "A_flow_m2": np.pi/4*D_fb**2},
-    {"name":"Conv. shield",   "Q_abs_W": 1.017e6,  "A_flow_m2": 0.60},
-    {"name":"Conv. bank 1",   "Q_abs_W": 2.167e6,  "A_flow_m2": 0.55},
-    {"name":"Conv. bank 2",   "Q_abs_W": 1.889e6,  "A_flow_m2": 0.55},
+    {"name":"Conv. shield",  "Q_abs_W": max(Q_sh_W,  1e4), "A_flow_m2": 0.60},
+    {"name":"Conv. bank 1",  "Q_abs_W": max(Q_b1_W,  1e4), "A_flow_m2": 0.55},
+    {"name":"Conv. bank 2",  "Q_abs_W": max(Q_b2_W,  1e4), "A_flow_m2": 0.55},
 ]
 
 fg_profile = flue_gas_profile(
     Q_release_W = Q_release*1e6,
     mdot_fg     = mdot_fg,
     sections    = sections_list,
-    T_fg_start  = T_fg_arch + 50,  # flame peak, then cools to arch value
+    T_fg_start  = T_fg_arch,       # start at arch temp — after radiant
     T_amb       = T_amb,
     stack_ID    = stack_ID,
     stack_H     = stack_H,
